@@ -37,10 +37,9 @@ func main() {
 	}
 
 	// initialize celery client
-	cli, _ := gocelery.NewCeleryClient(
+	cli := gocelery.NewCeleryClient(
 		gocelery.NewRedisBroker(redisPool),
 		&gocelery.RedisCeleryBackend{Pool: redisPool},
-		1,
 	)
 
 	// prepare arguments
@@ -49,7 +48,7 @@ func main() {
 	argB := rand.Intn(10)
 
 	// run task
-	asyncResult, err := cli.Delay(taskName, argA, argB)
+	asyncResult, err := cli.Delay(taskName, nil, argA, argB)
 	if err != nil {
 		panic(err)
 	}

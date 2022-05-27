@@ -27,10 +27,9 @@ func Example_client() {
 	}
 
 	// initialize celery client
-	cli, _ := NewCeleryClient(
+	cli := NewCeleryClient(
 		NewRedisBroker(redisPool),
 		&RedisCeleryBackend{Pool: redisPool},
-		1,
 	)
 
 	// prepare arguments
@@ -39,7 +38,7 @@ func Example_client() {
 	argB := rand.Intn(10)
 
 	// run task
-	asyncResult, err := cli.Delay(taskName, argA, argB)
+	asyncResult, err := cli.Delay(taskName, 0, argA, argB)
 	if err != nil {
 		panic(err)
 	}

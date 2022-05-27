@@ -17,31 +17,49 @@ import (
 type CeleryWorker struct {
 	broker          CeleryBroker
 	backend         CeleryBackend
-	numWorkers      int
-	registeredTasks map[string]interface{}
-	taskLock        sync.RWMutex
+	workerSpec      CeleryWorkerSpec
 	cancel          context.CancelFunc
 	workWG          sync.WaitGroup
 	rateLimitPeriod time.Duration
 }
 
+type CeleryWorkerSpec struct {
+	numWorkers      int
+	oid             string
+	registeredTasks map[string]interface{}
+	taskLock        sync.RWMutex
+}
+
+func (w *CeleryWorker) SetOID(oid string) {
+	w.workerSpec.taskLock.Lock()
+	defer w.workerSpec.taskLock.Unlock()
+	w.workerSpec.oid = oid
+}
+
 // NewCeleryWorker returns new celery worker
 func NewCeleryWorker(broker CeleryBroker, backend CeleryBackend, numWorkers int) *CeleryWorker {
 	return &CeleryWorker{
-		broker:          broker,
-		backend:         backend,
-		numWorkers:      numWorkers,
-		registeredTasks: map[string]interface{}{},
+		broker:  broker,
+		backend: backend,
+		workerSpec: CeleryWorkerSpec{
+			numWorkers:      numWorkers,
+			registeredTasks: map[string]interface{}{},
+			oid:             getNodeId(),
+		},
 		rateLimitPeriod: 100 * time.Millisecond,
 	}
+}
+
+func (w *CeleryWorker) Init() error {
+	return w.broker.Init(w.workerSpec.oid)
 }
 
 // StartWorkerWithContext starts celery worker(s) with given parent context
 func (w *CeleryWorker) StartWorkerWithContext(ctx context.Context) {
 	var wctx context.Context
 	wctx, w.cancel = context.WithCancel(ctx)
-	w.workWG.Add(w.numWorkers)
-	for i := 0; i < w.numWorkers; i++ {
+	w.workWG.Add(w.workerSpec.numWorkers)
+	for i := 0; i < w.workerSpec.numWorkers; i++ {
 		go func(workerID int) {
 			defer w.workWG.Done()
 			ticker := time.NewTicker(w.rateLimitPeriod)
@@ -50,29 +68,41 @@ func (w *CeleryWorker) StartWorkerWithContext(ctx context.Context) {
 				case <-wctx.Done():
 					return
 				case <-ticker.C:
-					// process task request
-					taskMessage, err := w.broker.GetTaskMessage()
-					if err != nil || taskMessage == nil {
-						continue
-					}
-
-					// run task
-					resultMsg, err := w.RunTask(taskMessage)
-					if err != nil {
-						log.Printf("failed to run task message %s: %+v", taskMessage.ID, err)
-						continue
-					}
-					defer releaseResultMessage(resultMsg)
-
-					// push result to backend
-					err = w.backend.SetResult(taskMessage.ID, resultMsg)
-					if err != nil {
-						log.Printf("failed to push result: %+v", err)
-						continue
-					}
+					w.RunOnce()
 				}
 			}
 		}(i)
+	}
+}
+
+func (w *CeleryWorker) RunOnce() {
+	// process task request
+	celeryMessage, err := w.broker.GetCeleryMessage()
+	defer releaseCeleryMessage(celeryMessage)
+	if err != nil || celeryMessage == nil {
+		return
+	}
+
+	taskMessage := celeryMessage.GetTaskMessage()
+	if taskMessage == nil {
+		return
+	}
+
+	// run task
+	resultMsg, err := w.RunTask(taskMessage)
+	if err != nil {
+		log.Printf("failed to run task message %s: %+v", taskMessage.ID, err)
+		return
+	}
+	defer releaseResultMessage(resultMsg)
+
+	// push result to backend
+
+	err = w.backend.SetResult(celeryMessage.Properties.CorrelationID,
+		resultMsg)
+	if err != nil {
+		log.Printf("failed to push result: %+v", err)
+		return
 	}
 }
 
@@ -94,25 +124,25 @@ func (w *CeleryWorker) StopWait() {
 
 // GetNumWorkers returns number of currently running workers
 func (w *CeleryWorker) GetNumWorkers() int {
-	return w.numWorkers
+	return w.workerSpec.numWorkers
 }
 
 // Register registers tasks (functions)
 func (w *CeleryWorker) Register(name string, task interface{}) {
-	w.taskLock.Lock()
-	w.registeredTasks[name] = task
-	w.taskLock.Unlock()
+	w.workerSpec.taskLock.Lock()
+	defer w.workerSpec.taskLock.Unlock()
+	w.workerSpec.registeredTasks[name] = task
 }
 
 // GetTask retrieves registered task
 func (w *CeleryWorker) GetTask(name string) interface{} {
-	w.taskLock.RLock()
-	task, ok := w.registeredTasks[name]
+	w.workerSpec.taskLock.RLock()
+	task, ok := w.workerSpec.registeredTasks[name]
 	if !ok {
-		w.taskLock.RUnlock()
+		w.workerSpec.taskLock.RUnlock()
 		return nil
 	}
-	w.taskLock.RUnlock()
+	w.workerSpec.taskLock.RUnlock()
 	return task
 }
 
@@ -159,7 +189,7 @@ func runTaskFunc(taskFunc *reflect.Value, message *TaskMessage) (*ResultMessage,
 	numArgs := taskFunc.Type().NumIn()
 	messageNumArgs := len(message.Args)
 	if numArgs != messageNumArgs {
-		return nil, fmt.Errorf("Number of task arguments %d does not match number of message arguments %d", numArgs, messageNumArgs)
+		return nil, fmt.Errorf("number of task arguments %d does not match number of message arguments %d", numArgs, messageNumArgs)
 	}
 
 	// construct arguments

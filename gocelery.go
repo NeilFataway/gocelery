@@ -5,62 +5,45 @@
 package gocelery
 
 import (
-	"context"
 	"fmt"
 	"time"
 )
 
 // CeleryClient provides API for sending celery tasks
 type CeleryClient struct {
-	broker  CeleryBroker
-	backend CeleryBackend
-	worker  *CeleryWorker
+	broker   CeleryBroker
+	backend  CeleryBackend
+	oid      string
+	priority uint8
 }
 
 // CeleryBroker is interface for celery broker database
 type CeleryBroker interface {
+	Init(string) error
 	SendCeleryMessage(*CeleryMessage) error
-	GetTaskMessage() (*TaskMessage, error) // must be non-blocking
+	GetCeleryMessage() (*CeleryMessage, error) // must be non-blocking
 }
 
 // CeleryBackend is interface for celery backend database
 type CeleryBackend interface {
+	Init(string) error
 	GetResult(string) (*ResultMessage, error) // must be non-blocking
 	SetResult(taskID string, result *ResultMessage) error
 }
 
 // NewCeleryClient creates new celery client
-func NewCeleryClient(broker CeleryBroker, backend CeleryBackend, numWorkers int) (*CeleryClient, error) {
+func NewCeleryClient(broker CeleryBroker, backend CeleryBackend) *CeleryClient {
 	return &CeleryClient{
 		broker,
 		backend,
-		NewCeleryWorker(broker, backend, numWorkers),
+		getNodeId(),
+		0,
 	}, nil
 }
 
-// Register task
-func (cc *CeleryClient) Register(name string, task interface{}) {
-	cc.worker.Register(name, task)
-}
-
-// StartWorkerWithContext starts celery workers with given parent context
-func (cc *CeleryClient) StartWorkerWithContext(ctx context.Context) {
-	cc.worker.StartWorkerWithContext(ctx)
-}
-
-// StartWorker starts celery workers
-func (cc *CeleryClient) StartWorker() {
-	cc.worker.StartWorker()
-}
-
-// StopWorker stops celery workers
-func (cc *CeleryClient) StopWorker() {
-	cc.worker.StopWorker()
-}
-
-// WaitForStopWorker waits for celery workers to terminate
-func (cc *CeleryClient) WaitForStopWorker() {
-	cc.worker.StopWait()
+// Delay gets asynchronous result
+func (cc *CeleryClient) Init() error {
+	return cc.backend.Init(cc.oid)
 }
 
 // Delay gets asynchronous result
@@ -70,6 +53,13 @@ func (cc *CeleryClient) Delay(task string, args ...interface{}) (*AsyncResult, e
 	return cc.delay(celeryTask)
 }
 
+// Call route the task to a specified worker, and gets asynchronous result
+func (cc *CeleryClient) Call(task, routingKey string, args ...interface{}) (*AsyncResult, error) {
+	celeryTask := getTaskMessage(task)
+	celeryTask.Args = args
+	return cc.call(celeryTask, routingKey)
+}
+
 // DelayKwargs gets asynchronous results with argument map
 func (cc *CeleryClient) DelayKwargs(task string, args map[string]interface{}) (*AsyncResult, error) {
 	celeryTask := getTaskMessage(task)
@@ -77,13 +67,19 @@ func (cc *CeleryClient) DelayKwargs(task string, args map[string]interface{}) (*
 	return cc.delay(celeryTask)
 }
 
+// CallKwargs route the task to a specified worker, and gets asynchronous result with argument map
+func (cc *CeleryClient) CallKwargs(task, routingKey string, args map[string]interface{}) (*AsyncResult, error) {
+	celeryTask := getTaskMessage(task)
+	celeryTask.Kwargs = args
+	return cc.call(celeryTask, routingKey)
+}
+
 func (cc *CeleryClient) delay(task *TaskMessage) (*AsyncResult, error) {
-	defer releaseTaskMessage(task)
-	encodedMessage, err := task.Encode()
-	if err != nil {
-		return nil, err
-	}
-	celeryMessage := getCeleryMessage(encodedMessage)
+	return cc.call(task, "")
+}
+
+func (cc *CeleryClient) call(task *TaskMessage, routingKey string) (*AsyncResult, error) {
+	celeryMessage, err := cc.getCeleryMessage(task, routingKey)
 	defer releaseCeleryMessage(celeryMessage)
 	err = cc.broker.SendCeleryMessage(celeryMessage)
 	if err != nil {
@@ -93,6 +89,21 @@ func (cc *CeleryClient) delay(task *TaskMessage) (*AsyncResult, error) {
 		TaskID:  task.ID,
 		backend: cc.backend,
 	}, nil
+}
+
+func (cc *CeleryClient) getCeleryMessage(task *TaskMessage, routingKey string) (*CeleryMessage, error) {
+	defer releaseTaskMessage(task)
+	encodedMessage, err := task.Encode()
+	if err != nil {
+		return nil, err
+	}
+	celeryMessage := getCeleryMessage(encodedMessage)
+	celeryMessage.Properties.CorrelationID = task.ID
+	celeryMessage.Properties.ReplyTo = cc.oid
+	celeryMessage.Properties.DeliveryInfo.RoutingKey = routingKey
+	celeryMessage.Properties.DeliveryInfo.Priority = cc.priority
+
+	return celeryMessage, nil
 }
 
 // CeleryTask is an interface that represents actual task
@@ -164,5 +175,5 @@ func (ar *AsyncResult) Ready() (bool, error) {
 		return false, err
 	}
 	ar.result = val
-	return (val != nil), nil
+	return val != nil, nil
 }

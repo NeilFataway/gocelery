@@ -30,25 +30,26 @@ func (cm *CeleryMessage) reset() {
 	cm.Properties.CorrelationID = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.ReplyTo = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.DeliveryTag = uuid.Must(uuid.NewV4()).String()
+	cm.Properties.DeliveryInfo = &defaultCeleryDeliveryInfo
+}
+
+func (cm *CeleryMessage) setDeliveryInfo(info *CeleryDeliveryInfo) {
+	cm.Properties.DeliveryInfo = info
 }
 
 var celeryMessagePool = sync.Pool{
 	New: func() interface{} {
 		return &CeleryMessage{
 			Body:        "",
-			Headers:     nil,
+			Headers:     map[string]interface{}{},
 			ContentType: "application/json",
 			Properties: CeleryProperties{
 				BodyEncoding:  "base64",
 				CorrelationID: uuid.Must(uuid.NewV4()).String(),
 				ReplyTo:       uuid.Must(uuid.NewV4()).String(),
-				DeliveryInfo: CeleryDeliveryInfo{
-					Priority:   0,
-					RoutingKey: "celery",
-					Exchange:   "celery",
-				},
-				DeliveryMode: 2,
-				DeliveryTag:  uuid.Must(uuid.NewV4()).String(),
+				DeliveryInfo:  &defaultCeleryDeliveryInfo,
+				DeliveryMode:  2,
+				DeliveryTag:   uuid.Must(uuid.NewV4()).String(),
 			},
 			ContentEncoding: "utf-8",
 		}
@@ -68,19 +69,25 @@ func releaseCeleryMessage(v *CeleryMessage) {
 
 // CeleryProperties represents properties json
 type CeleryProperties struct {
-	BodyEncoding  string             `json:"body_encoding"`
-	CorrelationID string             `json:"correlation_id"`
-	ReplyTo       string             `json:"reply_to"`
-	DeliveryInfo  CeleryDeliveryInfo `json:"delivery_info"`
-	DeliveryMode  int                `json:"delivery_mode"`
-	DeliveryTag   string             `json:"delivery_tag"`
+	BodyEncoding  string              `json:"body_encoding"`
+	CorrelationID string              `json:"correlation_id"`
+	ReplyTo       string              `json:"reply_to"`
+	DeliveryInfo  *CeleryDeliveryInfo `json:"delivery_info"`
+	DeliveryMode  uint8               `json:"delivery_mode"`
+	DeliveryTag   string              `json:"delivery_tag"`
 }
 
 // CeleryDeliveryInfo represents deliveryinfo json
 type CeleryDeliveryInfo struct {
-	Priority   int    `json:"priority"`
+	Priority   uint8  `json:"priority"`
 	RoutingKey string `json:"routing_key"`
 	Exchange   string `json:"exchange"`
+}
+
+var defaultCeleryDeliveryInfo = CeleryDeliveryInfo{
+	Priority:   0,
+	RoutingKey: "",
+	Exchange:   "",
 }
 
 // GetTaskMessage retrieve and decode task messages from broker
@@ -125,6 +132,9 @@ func (tm *TaskMessage) reset() {
 	tm.Task = ""
 	tm.Args = nil
 	tm.Kwargs = nil
+	tm.Retries = 0
+	tm.ETA = nil
+	tm.Expires = nil
 }
 
 var taskMessagePool = sync.Pool{
@@ -141,6 +151,7 @@ var taskMessagePool = sync.Pool{
 
 func getTaskMessage(task string) *TaskMessage {
 	msg := taskMessagePool.Get().(*TaskMessage)
+	msg.ID = generateUuid()
 	msg.Task = task
 	msg.Args = make([]interface{}, 0)
 	msg.Kwargs = make(map[string]interface{})

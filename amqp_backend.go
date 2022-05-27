@@ -12,11 +12,18 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// AMQPCeleryBackend CeleryBackend for AMQP
+/* AMQPCeleryBackend CeleryBackend for AMQP
+The difference between amqpbackend and rpcbackend:
+amqpbackend => reply to task_id queue
+rpcbackend => reply to celery_backend exchange and route the message to the client
+side who have waiting for it through the {oid}_result queue which is binding to
+celery_backend exchange.
+*/
 type AMQPCeleryBackend struct {
 	*amqp.Channel
-	Connection *amqp.Connection
-	Host       string
+	Connection     *amqp.Connection
+	Host           string
+	ExpireDuration time.Duration
 }
 
 // NewAMQPCeleryBackend creates new AMQPCeleryBackend
@@ -29,15 +36,19 @@ func NewAMQPCeleryBackend(host string) *AMQPCeleryBackend {
 // NewAMQPCeleryBackendByConnAndChannel creates new AMQPCeleryBackend by AMQP connection and channel
 func NewAMQPCeleryBackendByConnAndChannel(conn *amqp.Connection, channel *amqp.Channel) *AMQPCeleryBackend {
 	backend := &AMQPCeleryBackend{
-		Channel:    channel,
-		Connection: conn,
+		Channel:        channel,
+		Connection:     conn,
+		ExpireDuration: 24 * time.Hour,
 	}
 	return backend
 }
 
 // Reconnect reconnects to AMQP server
 func (b *AMQPCeleryBackend) Reconnect() {
-	b.Connection.Close()
+	go func() {
+		_ = b.Connection.Close()
+	}()
+
 	conn, channel := NewAMQPConnection(b.Host)
 	b.Channel = channel
 	b.Connection = conn
@@ -48,7 +59,7 @@ func (b *AMQPCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 
 	queueName := strings.Replace(taskID, "-", "", -1)
 
-	args := amqp.Table{"x-expires": int32(86400000)}
+	args := amqp.Table{"x-expires": int32(b.ExpireDuration.Microseconds())}
 
 	_, err := b.QueueDeclare(
 		queueName, // name
@@ -84,7 +95,7 @@ func (b *AMQPCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 	var resultMessage ResultMessage
 
 	delivery := <-channel
-	deliveryAck(delivery)
+	_ = deliveryAck(delivery)
 	if err := json.Unmarshal(delivery.Body, &resultMessage); err != nil {
 		return nil, err
 	}
@@ -102,7 +113,7 @@ func (b *AMQPCeleryBackend) SetResult(taskID string, result *ResultMessage) erro
 	// autodelete is automatically set to true by python
 	// (406) PRECONDITION_FAILED - inequivalent arg 'durable' for queue 'bc58c0d895c7421eb7cb2b9bbbd8b36f' in vhost '/': received 'true' but current is 'false'
 
-	args := amqp.Table{"x-expires": int32(86400000)}
+	args := amqp.Table{"x-expires": int32(b.ExpireDuration.Microseconds())}
 	_, err := b.QueueDeclare(
 		queueName, // name
 		true,      // durable
@@ -146,4 +157,9 @@ func (b *AMQPCeleryBackend) SetResult(taskID string, result *ResultMessage) erro
 		false,
 		message,
 	)
+}
+
+func (b *AMQPCeleryBackend) Init(oid string) error {
+	// amqp backend do nothing through init phase
+	return nil
 }

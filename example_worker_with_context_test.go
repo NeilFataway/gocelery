@@ -25,10 +25,13 @@ func Example_workerWithContext() {
 	}
 
 	// initialize celery client
-	cli, _ := NewCeleryClient(
+	cli := NewCeleryWorker(
 		NewRedisBroker(redisPool),
-		&RedisCeleryBackend{Pool: redisPool},
-		1,
+		&RedisCeleryBackend{
+			Pool:           redisPool,
+			ExpireDuration: 24 * time.Hour,
+		},
+		5,
 	)
 
 	// task
@@ -52,6 +55,6 @@ func Example_workerWithContext() {
 	cancel()
 
 	// optional: wait for all workers to terminate
-	cli.WaitForStopWorker()
+	cli.StopWait()
 
 }

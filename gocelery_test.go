@@ -72,26 +72,28 @@ func TestNoArg(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 5)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		// json always return float64 intead of int
 		if tc.expected != int(res.(float64)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -140,26 +142,28 @@ func TestInteger(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 5)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		// json always return float64 intead of int
 		if tc.expected != int(res.(float64)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -208,9 +212,11 @@ func TestIntegerNamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 5)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -220,20 +226,20 @@ func TestIntegerNamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		// json always return float64 intead of int
 		if tc.expected != int(res.(float64)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -282,25 +288,27 @@ func TestString(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(string) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -349,9 +357,11 @@ func TestStringNamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -361,19 +371,19 @@ func TestStringNamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(string) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -422,25 +432,27 @@ func TestStringInteger(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(string) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -489,9 +501,11 @@ func TestStringIntegerNamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -501,19 +515,19 @@ func TestStringIntegerNamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(string) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -562,25 +576,27 @@ func TestFloat(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(float64) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -629,9 +645,11 @@ func TestFloatNamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -641,19 +659,19 @@ func TestFloatNamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(float64) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -704,25 +722,27 @@ func TestFloat32(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != float32(res.(float64)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -773,9 +793,11 @@ func TestFloat32NamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -785,19 +807,19 @@ func TestFloat32NamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != float32(res.(float64)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -846,25 +868,27 @@ func TestBool(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(bool) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -913,9 +937,11 @@ func TestBoolNamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -925,19 +951,19 @@ func TestBoolNamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != res.(bool) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -986,9 +1012,11 @@ func TestArrayIntNamedArguments(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.DelayKwargs(
 			tc.taskName,
 			map[string]interface{}{
@@ -998,19 +1026,19 @@ func TestArrayIntNamedArguments(t *testing.T) {
 		)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if tc.expected != int(res.(float64)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -1059,25 +1087,27 @@ func TestArray(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if !reflect.DeepEqual(tc.expected, convertInterfaceToStringSlice(res)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 
@@ -1126,25 +1156,27 @@ func TestMap(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli, _ := NewCeleryClient(tc.broker, tc.backend, 1)
-		cli.Register(tc.taskName, tc.taskFunc)
-		cli.StartWorker()
+		worker := NewCeleryWorker(tc.broker, tc.backend, 1)
+		worker.Register(tc.taskName, tc.taskFunc)
+		worker.StartWorker()
+
+		cli := NewCeleryClient(tc.broker, tc.backend)
 		asyncResult, err := cli.Delay(tc.taskName, tc.inA, tc.inB)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		res, err := asyncResult.Get(TIMEOUT)
 		if err != nil {
 			t.Errorf("test '%s': failed to get result for task %s: %+v", tc.name, tc.taskName, err)
-			cli.StopWorker()
+			worker.StopWorker()
 			continue
 		}
 		if !reflect.DeepEqual(tc.expected, convertInterfaceToStringMap(res)) {
 			t.Errorf("test '%s': returned result %+v is different from expected result %+v", tc.name, res, tc.expected)
 		}
-		cli.StopWorker()
+		worker.StopWorker()
 	}
 }
 

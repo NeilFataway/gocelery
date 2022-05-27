@@ -5,13 +5,12 @@
 package gocelery
 
 import (
-	"log"
-
 	"github.com/streadway/amqp"
+	"log"
 )
 
 // deliveryAck acknowledges delivery message with retries on error
-func deliveryAck(delivery amqp.Delivery) {
+func deliveryAck(delivery amqp.Delivery) error {
 	var err error
 	for retryCount := 3; retryCount > 0; retryCount-- {
 		if err = delivery.Ack(false); err == nil {
@@ -20,5 +19,7 @@ func deliveryAck(delivery amqp.Delivery) {
 	}
 	if err != nil {
 		log.Printf("amqp_backend: failed to acknowledge result message %+v: %+v", delivery.MessageId, err)
+		return err
 	}
+	return nil
 }

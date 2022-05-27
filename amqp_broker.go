@@ -7,9 +7,8 @@ package gocelery
 import (
 	"encoding/json"
 	"fmt"
-	"time"
-
 	"github.com/streadway/amqp"
+	"time"
 )
 
 // AMQPExchange stores AMQP Exchange configuration
@@ -20,40 +19,24 @@ type AMQPExchange struct {
 	AutoDelete bool
 }
 
-// NewAMQPExchange creates new AMQPExchange
-func NewAMQPExchange(name string) *AMQPExchange {
-	return &AMQPExchange{
-		Name:       name,
-		Type:       "direct",
-		Durable:    true,
-		AutoDelete: true,
-	}
-}
-
-// AMQPQueue stores AMQP Queue configuration
+// AMQPQueue stores AMQP RpcQueue configuration
 type AMQPQueue struct {
 	Name       string
 	Durable    bool
 	AutoDelete bool
 }
 
-// NewAMQPQueue creates new AMQPQueue
-func NewAMQPQueue(name string) *AMQPQueue {
-	return &AMQPQueue{
-		Name:       name,
-		Durable:    true,
-		AutoDelete: false,
-	}
-}
-
 //AMQPCeleryBroker is RedisBroker for AMQP
 type AMQPCeleryBroker struct {
 	*amqp.Channel
-	Connection       *amqp.Connection
-	Exchange         *AMQPExchange
-	Queue            *AMQPQueue
-	consumingChannel <-chan amqp.Delivery
-	Rate             int
+	Connection      *amqp.Connection
+	DirectExchange  *AMQPExchange
+	RpcQueue        *AMQPQueue
+	DispatchQueue   *AMQPQueue
+	rpcChannel      <-chan amqp.Delivery
+	dispatchChannel <-chan amqp.Delivery
+	Initialized     bool
+	Rate            int
 }
 
 // NewAMQPConnection creates new AMQP channel
@@ -80,80 +63,150 @@ func NewAMQPCeleryBrokerByConnAndChannel(conn *amqp.Connection, channel *amqp.Ch
 	broker := &AMQPCeleryBroker{
 		Channel:    channel,
 		Connection: conn,
-		Exchange:   NewAMQPExchange("default"),
-		Queue:      NewAMQPQueue("celery"),
-		Rate:       4,
+		DirectExchange: &AMQPExchange{
+			Name:       "celery_rpc",
+			Type:       "direct",
+			Durable:    true,
+			AutoDelete: false,
+		},
+		RpcQueue: &AMQPQueue{
+			Durable:    true,
+			AutoDelete: true,
+		},
+		DispatchQueue: &AMQPQueue{
+			Name:       "celery_dispatch",
+			Durable:    true,
+			AutoDelete: true,
+		},
+		Rate: 4,
 	}
-	if err := broker.CreateExchange(); err != nil {
-		panic(err)
-	}
-	if err := broker.CreateQueue(); err != nil {
-		panic(err)
-	}
-	if err := broker.Qos(broker.Rate, 0, false); err != nil {
-		panic(err)
-	}
-	if err := broker.StartConsumingChannel(); err != nil {
-		panic(err)
-	}
+
 	return broker
 }
 
 // StartConsumingChannel spawns receiving channel on AMQP queue
 func (b *AMQPCeleryBroker) StartConsumingChannel() error {
-	channel, err := b.Consume(b.Queue.Name, "", false, false, false, false, nil)
+	if b.Initialized == false {
+		return fmt.Errorf("consumming on an unintialized broker is rejected")
+	}
+	channel, err := b.Consume(b.RpcQueue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return err
 	}
-	b.consumingChannel = channel
+	b.rpcChannel = channel
+
+	channel, err = b.Consume(b.DispatchQueue.Name, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+	b.dispatchChannel = channel
+
+	return nil
+}
+
+func (b *AMQPCeleryBroker) Init(oid string) error {
+	/* AMQP broker create two exchange, one with direct type, another with fanout type.
+	AMQP broker crate only one queue meanwhile. Both exchange should bind to the specied queue.
+	Direct type exchange should bind to the queue with routing key {oid}.
+	*/
+	if b.RpcQueue.Name == "" {
+		b.RpcQueue.Name = fmt.Sprintf("%s_dispatch", oid)
+	}
+
+	if err := b.ExchangeDeclare(
+		b.DirectExchange.Name,
+		b.DirectExchange.Type,
+		b.DirectExchange.Durable,
+		b.DirectExchange.AutoDelete,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	if _, err := b.QueueDeclare(
+		b.RpcQueue.Name,
+		b.RpcQueue.Durable,
+		b.RpcQueue.AutoDelete,
+		false,
+		false,
+		amqp.Table{
+			"x-max-priority": 9,
+		},
+	); err != nil {
+		return err
+	}
+
+	if _, err := b.QueueDeclare(
+		b.DispatchQueue.Name,
+		b.DispatchQueue.Durable,
+		b.DispatchQueue.AutoDelete,
+		false,
+		false,
+		amqp.Table{
+			"x-max-priority": 9,
+		},
+	); err != nil {
+		return err
+	}
+
+	if err := b.ExchangeBind(
+		b.RpcQueue.Name,
+		oid,
+		b.DirectExchange.Name,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	if err := b.Qos(b.Rate, 0, false); err != nil {
+		return err
+	}
+
+	b.Initialized = true
+
+	if err := b.StartConsumingChannel(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // SendCeleryMessage sends CeleryMessage to broker
 func (b *AMQPCeleryBroker) SendCeleryMessage(message *CeleryMessage) error {
-	taskMessage := message.GetTaskMessage()
-	queueName := "celery"
-	_, err := b.QueueDeclare(
-		queueName, // name
-		true,      // durable
-		false,     // autoDelete
-		false,     // exclusive
-		false,     // noWait
-		nil,       // args
-	)
-	if err != nil {
-		return err
-	}
-	err = b.ExchangeDeclare(
-		"default",
-		"direct",
-		true,
-		true,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-
-	resBytes, err := json.Marshal(taskMessage)
-	if err != nil {
-		return err
+	if b.Initialized == false {
+		return fmt.Errorf("consumming on an unintialized broker is rejected")
 	}
 
 	publishMessage := amqp.Publishing{
-		DeliveryMode: amqp.Persistent,
-		Timestamp:    time.Now(),
-		ContentType:  "application/json",
-		Body:         resBytes,
+		DeliveryMode:    message.Properties.DeliveryMode,
+		Timestamp:       time.Now(),
+		ContentType:     message.ContentType,
+		Body:            []byte(message.Body),
+		Headers:         message.Headers,
+		ReplyTo:         message.Properties.ReplyTo,
+		CorrelationId:   message.Properties.CorrelationID,
+		ContentEncoding: message.ContentEncoding,
+		Priority:        message.Properties.DeliveryInfo.Priority,
+	}
+
+	if message.Properties.DeliveryInfo.RoutingKey == "" {
+		// The message should be deliver to dispatch queue when the routing key is empty,
+		message.Properties.DeliveryInfo.RoutingKey = b.DispatchQueue.Name
+		message.Properties.DeliveryInfo.Exchange = ""
+	} else {
+		// The message should be deliver to rpc queue when the routing key is not empty,
+		message.Properties.DeliveryInfo.RoutingKey = b.RpcQueue.Name
+		message.Properties.DeliveryInfo.Exchange = b.DirectExchange.Name
 	}
 
 	return b.Publish(
-		"",
-		queueName,
-		false,
-		false,
+		message.Properties.DeliveryInfo.Exchange,
+		message.Properties.DeliveryInfo.RoutingKey,
+		true,
+		true,
 		publishMessage,
 	)
 }
@@ -161,8 +214,16 @@ func (b *AMQPCeleryBroker) SendCeleryMessage(message *CeleryMessage) error {
 // GetTaskMessage retrieves task message from AMQP queue
 func (b *AMQPCeleryBroker) GetTaskMessage() (*TaskMessage, error) {
 	select {
-	case delivery := <-b.consumingChannel:
-		deliveryAck(delivery)
+	// we listen to two queue when it comes to broker, because we wanna both rpcMessage and dispatchMessage
+	case delivery := <-b.rpcChannel:
+		_ = deliveryAck(delivery)
+		var taskMessage TaskMessage
+		if err := json.Unmarshal(delivery.Body, &taskMessage); err != nil {
+			return nil, err
+		}
+		return &taskMessage, nil
+	case delivery := <-b.dispatchChannel:
+		_ = deliveryAck(delivery)
 		var taskMessage TaskMessage
 		if err := json.Unmarshal(delivery.Body, &taskMessage); err != nil {
 			return nil, err
@@ -173,28 +234,34 @@ func (b *AMQPCeleryBroker) GetTaskMessage() (*TaskMessage, error) {
 	}
 }
 
-// CreateExchange declares AMQP exchange with stored configuration
-func (b *AMQPCeleryBroker) CreateExchange() error {
-	return b.ExchangeDeclare(
-		b.Exchange.Name,
-		b.Exchange.Type,
-		b.Exchange.Durable,
-		b.Exchange.AutoDelete,
-		false,
-		false,
-		nil,
-	)
-}
+func (b *AMQPCeleryBroker) GetCeleryMessage() (*CeleryMessage, error) {
+	select {
+	case delivery := <-b.rpcChannel:
+		if err := deliveryAck(delivery); err != nil {
+			return nil, err
+		}
 
-// CreateQueue declares AMQP Queue with stored configuration
-func (b *AMQPCeleryBroker) CreateQueue() error {
-	_, err := b.QueueDeclare(
-		b.Queue.Name,
-		b.Queue.Durable,
-		b.Queue.AutoDelete,
-		false,
-		false,
-		nil,
-	)
-	return err
+		message := &CeleryMessage{
+			Body:            string(delivery.Body),
+			Headers:         delivery.Headers,
+			ContentType:     delivery.ContentType,
+			ContentEncoding: delivery.ContentEncoding,
+			Properties: CeleryProperties{
+				BodyEncoding:  "utf-8",
+				CorrelationID: delivery.CorrelationId,
+				ReplyTo:       delivery.ReplyTo,
+				DeliveryInfo: &CeleryDeliveryInfo{
+					Priority:   delivery.Priority,
+					Exchange:   delivery.Exchange,
+					RoutingKey: delivery.RoutingKey,
+				},
+				DeliveryMode: delivery.DeliveryMode,
+				DeliveryTag:  fmt.Sprintf("%d%", delivery.DeliveryTag),
+			},
+		}
+
+		return message, nil
+	default:
+		return nil, fmt.Errorf("consuming broker channel is empty")
+	}
 }

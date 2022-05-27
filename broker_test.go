@@ -51,15 +51,17 @@ func TestBrokerRedisSend(t *testing.T) {
 			continue
 		}
 		conn := tc.broker.Get()
-		defer conn.Close()
-		messageJSON, err := conn.Do("BRPOP", tc.broker.QueueName, "1")
+		defer func() {
+			_ = conn.Close()
+		}()
+		messageJSON, err := conn.Do("BRPOP", tc.broker.DispatchBaseQueueName, "1")
 		if err != nil || messageJSON == nil {
 			t.Errorf("test '%s': failed to get celery message from broker: %v", tc.name, err)
 			releaseCeleryMessage(celeryMessage)
 			continue
 		}
 		messageList := messageJSON.([]interface{})
-		if string(messageList[0].([]byte)) != "celery" {
+		if string(messageList[0].([]byte)) != tc.broker.DispatchBaseQueueName {
 			t.Errorf("test '%s': non celery message received", tc.name)
 			releaseCeleryMessage(celeryMessage)
 			continue
@@ -105,8 +107,10 @@ func TestBrokerRedisGet(t *testing.T) {
 			continue
 		}
 		conn := tc.broker.Get()
-		defer conn.Close()
-		_, err = conn.Do("LPUSH", tc.broker.QueueName, jsonBytes)
+		defer func() {
+			_ = conn.Close()
+		}()
+		_, err = conn.Do("LPUSH", tc.broker.DispatchBaseQueueName, jsonBytes)
 		if err != nil {
 			t.Errorf("test '%s': failed to push celery message to redis: %v", tc.name, err)
 			releaseCeleryMessage(celeryMessage)
@@ -146,6 +150,7 @@ func TestBrokerSendGet(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		celeryMessage, err := makeCeleryMessage()
+		defer releaseCeleryMessage(celeryMessage)
 		if err != nil || celeryMessage == nil {
 			t.Errorf("test '%s': failed to construct celery message: %v", tc.name, err)
 			continue
@@ -153,21 +158,21 @@ func TestBrokerSendGet(t *testing.T) {
 		err = tc.broker.SendCeleryMessage(celeryMessage)
 		if err != nil {
 			t.Errorf("test '%s': failed to send celery message to broker: %v", tc.name, err)
-			releaseCeleryMessage(celeryMessage)
 			continue
 		}
+
 		// wait arbitrary time for message to propagate
 		time.Sleep(1 * time.Second)
-		message, err := tc.broker.GetTaskMessage()
+		message, err := tc.broker.GetCeleryMessage()
+		defer releaseCeleryMessage(message)
 		if err != nil {
 			t.Errorf("test '%s': failed to get celery message from broker: %v", tc.name, err)
-			releaseCeleryMessage(celeryMessage)
 			continue
 		}
 		originalMessage := celeryMessage.GetTaskMessage()
-		if !reflect.DeepEqual(message, originalMessage) {
+		receivedMessage := message.GetTaskMessage()
+		if !reflect.DeepEqual(receivedMessage, originalMessage) {
 			t.Errorf("test '%s': received message %v different from original message %v", tc.name, message, originalMessage)
 		}
-		releaseCeleryMessage(celeryMessage)
 	}
 }

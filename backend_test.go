@@ -41,7 +41,9 @@ func TestBackendRedisGetResult(t *testing.T) {
 			continue
 		}
 		conn := tc.backend.Get()
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 		_, err = conn.Do("SETEX", fmt.Sprintf("celery-task-meta-%s", taskID), 86400, messageBytes)
 		if err != nil {
 			t.Errorf("test '%s': error setting result message to celery: %v", tc.name, err)
@@ -87,7 +89,9 @@ func TestBackendRedisSetResult(t *testing.T) {
 			continue
 		}
 		conn := tc.backend.Get()
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 		val, err := conn.Do("GET", fmt.Sprintf("celery-task-meta-%s", taskID))
 		if err != nil {
 			t.Errorf("test '%s': error getting data from redis: %v", tc.name, err)

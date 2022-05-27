@@ -24,10 +24,13 @@ func Example_worker() {
 	}
 
 	// initialize celery client
-	cli, _ := NewCeleryClient(
+	cli := NewCeleryWorker(
 		NewRedisBroker(redisPool),
-		&RedisCeleryBackend{Pool: redisPool},
-		5, // number of workers
+		&RedisCeleryBackend{
+			Pool:           redisPool,
+			ExpireDuration: 24 * time.Hour,
+		},
+		5,
 	)
 
 	// task

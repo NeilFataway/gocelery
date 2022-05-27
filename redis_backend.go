@@ -7,6 +7,7 @@ package gocelery
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gomodule/redigo/redis"
 )
@@ -14,13 +15,15 @@ import (
 // RedisCeleryBackend is celery backend for redis
 type RedisCeleryBackend struct {
 	*redis.Pool
+	ExpireDuration time.Duration
 }
 
 // NewRedisBackend creates new RedisCeleryBackend with given redis pool.
 // RedisCeleryBackend can be initialized manually as well.
 func NewRedisBackend(conn *redis.Pool) *RedisCeleryBackend {
 	return &RedisCeleryBackend{
-		Pool: conn,
+		Pool:           conn,
+		ExpireDuration: 24 * time.Hour,
 	}
 }
 
@@ -30,14 +33,18 @@ func NewRedisBackend(conn *redis.Pool) *RedisCeleryBackend {
 // and should not be used. Pool should be initialized outside of gocelery package.
 func NewRedisCeleryBackend(uri string) *RedisCeleryBackend {
 	return &RedisCeleryBackend{
-		Pool: NewRedisPool(uri),
+		Pool:           NewRedisPool(uri),
+		ExpireDuration: 24 * time.Hour,
 	}
 }
 
 // GetResult queries redis backend to get asynchronous result
 func (cb *RedisCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 	conn := cb.Get()
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
+
 	val, err := conn.Do("GET", fmt.Sprintf("celery-task-meta-%s", taskID))
 	if err != nil {
 		return nil, err
@@ -60,7 +67,14 @@ func (cb *RedisCeleryBackend) SetResult(taskID string, result *ResultMessage) er
 		return err
 	}
 	conn := cb.Get()
-	defer conn.Close()
-	_, err = conn.Do("SETEX", fmt.Sprintf("celery-task-meta-%s", taskID), 86400, resBytes)
+	defer func() {
+		_ = conn.Close()
+	}()
+	_, err = conn.Do("SETEX", fmt.Sprintf("celery-task-meta-%s", taskID), cb.ExpireDuration.Seconds(), resBytes)
 	return err
+}
+
+func (cb *RedisCeleryBackend) Init(oid string) error {
+	// redis backend do nothing through init phase.
+	return nil
 }
