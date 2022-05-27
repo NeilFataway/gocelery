@@ -124,7 +124,7 @@ func (b *RpcCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 	for {
 		select {
 		case delivery := <-channel:
-			_ = deliveryAck(delivery)
+			deliveryAck(delivery)
 			var resultMessage ResultMessage
 			if err := json.Unmarshal(delivery.Body, &resultMessage); err != nil {
 				return nil, err

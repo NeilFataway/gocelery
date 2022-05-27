@@ -95,7 +95,7 @@ func (b *AMQPCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 	var resultMessage ResultMessage
 
 	delivery := <-channel
-	_ = deliveryAck(delivery)
+	deliveryAck(delivery)
 	if err := json.Unmarshal(delivery.Body, &resultMessage); err != nil {
 		return nil, err
 	}

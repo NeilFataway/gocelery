@@ -216,14 +216,14 @@ func (b *AMQPCeleryBroker) GetTaskMessage() (*TaskMessage, error) {
 	select {
 	// we listen to two queue when it comes to broker, because we wanna both rpcMessage and dispatchMessage
 	case delivery := <-b.rpcChannel:
-		_ = deliveryAck(delivery)
+		deliveryAck(delivery)
 		var taskMessage TaskMessage
 		if err := json.Unmarshal(delivery.Body, &taskMessage); err != nil {
 			return nil, err
 		}
 		return &taskMessage, nil
 	case delivery := <-b.dispatchChannel:
-		_ = deliveryAck(delivery)
+		deliveryAck(delivery)
 		var taskMessage TaskMessage
 		if err := json.Unmarshal(delivery.Body, &taskMessage); err != nil {
 			return nil, err
@@ -237,10 +237,7 @@ func (b *AMQPCeleryBroker) GetTaskMessage() (*TaskMessage, error) {
 func (b *AMQPCeleryBroker) GetCeleryMessage() (*CeleryMessage, error) {
 	select {
 	case delivery := <-b.rpcChannel:
-		if err := deliveryAck(delivery); err != nil {
-			return nil, err
-		}
-
+		deliveryAck(delivery)
 		message := &CeleryMessage{
 			Body:            string(delivery.Body),
 			Headers:         delivery.Headers,
