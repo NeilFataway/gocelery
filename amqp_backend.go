@@ -159,7 +159,7 @@ func (b *AMQPCeleryBackend) SetResult(taskID string, result *ResultMessage) erro
 	)
 }
 
-func (b *AMQPCeleryBackend) Init(oid string) error {
+func (b *AMQPCeleryBackend) Init(string) error {
 	// amqp backend do nothing through init phase
 	return nil
 }

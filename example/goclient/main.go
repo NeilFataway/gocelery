@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/gocelery/gocelery"
+	"github.com/Neilfataway/gocelery"
 	"github.com/gomodule/redigo/redis"
 )
 

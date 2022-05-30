@@ -74,7 +74,7 @@ func (cb *RedisCeleryBackend) SetResult(taskID string, result *ResultMessage) er
 	return err
 }
 
-func (cb *RedisCeleryBackend) Init(oid string) error {
+func (cb *RedisCeleryBackend) Init(string) error {
 	// redis backend do nothing through init phase.
 	return nil
 }

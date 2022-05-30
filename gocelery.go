@@ -38,7 +38,7 @@ func NewCeleryClient(broker CeleryBroker, backend CeleryBackend) *CeleryClient {
 		backend,
 		getNodeId(),
 		0,
-	}, nil
+	}
 }
 
 // Delay gets asynchronous result
