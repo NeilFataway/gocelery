@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var NoBackendConfigured = fmt.Errorf("no backend configured, no result returned")
+
 // CeleryClient provides API for sending celery tasks
 type CeleryClient struct {
 	broker   CeleryBroker
@@ -138,6 +140,9 @@ func (ar *AsyncResult) Get(timeout time.Duration) (interface{}, error) {
 			return nil, err
 		case <-ticker.C:
 			val, err := ar.AsyncGet()
+			if err == NoBackendConfigured {
+				return nil, err
+			}
 			if err != nil {
 				continue
 			}
@@ -150,6 +155,9 @@ func (ar *AsyncResult) Get(timeout time.Duration) (interface{}, error) {
 func (ar *AsyncResult) AsyncGet() (interface{}, error) {
 	if ar.result != nil {
 		return ar.result.Result, nil
+	}
+	if ar.backend == nil {
+		return nil, NoBackendConfigured
 	}
 	val, err := ar.backend.GetResult(ar.TaskID)
 	if err != nil {

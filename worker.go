@@ -97,6 +97,10 @@ func (w *CeleryWorker) RunOnce() {
 	defer releaseResultMessage(resultMsg)
 
 	// push result to backend
+	if w.backend == nil {
+		// No result will be returned if no backend configured.
+		return
+	}
 
 	err = w.backend.SetResult(celeryMessage.Properties.CorrelationID,
 		resultMsg)
