@@ -78,10 +78,10 @@ func (w *CeleryWorker) StartWorkerWithContext(ctx context.Context) {
 func (w *CeleryWorker) RunOnce() {
 	// process task request
 	celeryMessage, err := w.broker.GetCeleryMessage()
-	defer releaseCeleryMessage(celeryMessage)
 	if err != nil || celeryMessage == nil {
 		return
 	}
+	defer releaseCeleryMessage(celeryMessage)
 
 	taskMessage := celeryMessage.GetTaskMessage()
 	if taskMessage == nil {

@@ -63,8 +63,10 @@ func getCeleryMessage(encodedTaskMessage string) *CeleryMessage {
 }
 
 func releaseCeleryMessage(v *CeleryMessage) {
-	v.reset()
-	celeryMessagePool.Put(v)
+	if v != nil {
+		v.reset()
+		celeryMessagePool.Put(v)
+	}
 }
 
 // CeleryProperties represents properties json
