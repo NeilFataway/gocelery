@@ -151,7 +151,7 @@ func (b *AMQPCeleryBroker) Init(oid string) error {
 		return err
 	}
 
-	if err := b.ExchangeBind(
+	if err := b.QueueBind(
 		b.RpcQueue.Name,
 		oid,
 		b.DirectExchange.Name,

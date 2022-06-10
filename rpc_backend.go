@@ -89,7 +89,7 @@ func (b *RpcCeleryBackend) Init(oid string) error {
 		return err
 	}
 
-	err = b.ExchangeBind(b.Queue.Name,
+	err = b.QueueBind(b.Queue.Name,
 		"",
 		b.Exchange.Name,
 		false,
