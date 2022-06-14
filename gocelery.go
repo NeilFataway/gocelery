@@ -45,6 +45,9 @@ func NewCeleryClient(broker CeleryBroker, backend CeleryBackend) *CeleryClient {
 
 // Delay gets asynchronous result
 func (cc *CeleryClient) Init() error {
+	if cc.backend == nil {
+		return nil // do nothing when no backend configured
+	}
 	return cc.backend.Init(cc.oid)
 }
 
