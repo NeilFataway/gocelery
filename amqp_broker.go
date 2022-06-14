@@ -67,7 +67,7 @@ func NewAMQPCeleryBrokerByConnAndChannel(conn *amqp.Connection, channel *amqp.Ch
 			Name:       "celery_rpc",
 			Type:       "direct",
 			Durable:    true,
-			AutoDelete: false,
+			AutoDelete: true,
 		},
 		RpcQueue: &AMQPQueue{
 			Durable:    true,
@@ -176,10 +176,6 @@ func (b *AMQPCeleryBroker) Init(oid string) error {
 
 // SendCeleryMessage sends CeleryMessage to broker
 func (b *AMQPCeleryBroker) SendCeleryMessage(message *CeleryMessage) error {
-	if b.Initialized == false {
-		return fmt.Errorf("consumming on an unintialized broker is rejected")
-	}
-
 	publishMessage := amqp.Publishing{
 		DeliveryMode:    message.Properties.DeliveryMode,
 		Timestamp:       time.Now(),

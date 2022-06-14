@@ -44,13 +44,13 @@ func NewRpcCeleryBackendByConnAndChannel(conn *amqp.Connection, channel *amqp.Ch
 		Connection: conn,
 		Queue: &AMQPQueue{
 			Durable:    true,
-			AutoDelete: false,
+			AutoDelete: true,
 		},
 		Exchange: &AMQPExchange{
 			Name:       "celery_backend",
 			Type:       "fanout",
 			Durable:    true,
-			AutoDelete: false,
+			AutoDelete: true,
 		},
 		ExpireDuration: 24 * time.Hour,
 		task2Reply:     cache.New(24*time.Hour, 5*time.Minute),
