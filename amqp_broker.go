@@ -222,7 +222,7 @@ func (b *AMQPCeleryBroker) GetCeleryMessage() (*CeleryMessage, error) {
 			ContentType:     delivery.ContentType,
 			ContentEncoding: delivery.ContentEncoding,
 			Properties: CeleryProperties{
-				BodyEncoding:  "utf-8",
+				BodyEncoding:  "base64",
 				CorrelationID: delivery.CorrelationId,
 				ReplyTo:       delivery.ReplyTo,
 				DeliveryInfo: &CeleryDeliveryInfo{
