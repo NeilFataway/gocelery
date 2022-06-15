@@ -207,7 +207,7 @@ func (b *AMQPCeleryBroker) SendCeleryMessage(message *CeleryMessage) error {
 		message.Properties.DeliveryInfo.Exchange,
 		message.Properties.DeliveryInfo.RoutingKey,
 		true,
-		true,
+		false,
 		publishMessage,
 	)
 }
