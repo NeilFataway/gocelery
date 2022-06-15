@@ -44,7 +44,6 @@ func NewCeleryWorker(broker CeleryBroker, backend CeleryBackend, numWorkers int)
 		workerSpec: CeleryWorkerSpec{
 			numWorkers:      numWorkers,
 			registeredTasks: map[string]interface{}{},
-			oid:             getNodeId(),
 		},
 		rateLimitPeriod: 100 * time.Millisecond,
 	}
