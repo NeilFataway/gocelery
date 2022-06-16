@@ -10,6 +10,7 @@ import (
 )
 
 var NoBackendConfigured = fmt.Errorf("no backend configured, no result returned")
+var ResultNotAvailableYet = fmt.Errorf("result not available yet")
 
 // CeleryClient provides API for sending celery tasks
 type CeleryClient struct {
@@ -97,7 +98,6 @@ func (cc *CeleryClient) call(task *TaskMessage, routingKey string) (*AsyncResult
 }
 
 func (cc *CeleryClient) getCeleryMessage(task *TaskMessage, routingKey string) (*CeleryMessage, error) {
-	defer releaseTaskMessage(task)
 	encodedMessage, err := task.Encode()
 	if err != nil {
 		return nil, err

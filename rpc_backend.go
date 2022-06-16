@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/patrickmn/go-cache"
+	"log"
 	"time"
 
 	"github.com/streadway/amqp"
@@ -100,6 +101,35 @@ func (b *RpcCeleryBackend) Init(oid string) error {
 	}
 
 	b.Initialized = true
+	return b.startConsume()
+}
+
+func (b *RpcCeleryBackend) startConsume() error {
+	// open channel temporarily
+	channel, err := b.Consume(b.Queue.Name, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			select {
+			case delivery := <-channel:
+				deliveryAck(delivery)
+				var resultMessage ResultMessage
+				if err = json.Unmarshal(delivery.Body, &resultMessage); err != nil {
+					log.Print("Error: unserialize result failed.")
+					continue
+				}
+				// use cache map to ensure there no resource leaked after long-time running.
+				// 'cause all task_result are broadcast to every client queue.
+				// So there will be lots of task_result which belongs to other client received.
+				// We must ensure that those task_result which our client wouldn't care can
+				// be purged after expiration time.
+				b.task2Reply.SetDefault(delivery.CorrelationId, &resultMessage)
+			}
+		}
+	}()
 	return nil
 }
 
@@ -113,34 +143,8 @@ func (b *RpcCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 	if result, ok := b.task2Reply.Get(taskID); ok {
 		b.task2Reply.Delete(taskID)
 		return result.(*ResultMessage), nil
-	}
-
-	// open channel temporarily
-	channel, err := b.Consume(b.Queue.Name, "", false, false, false, false, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		select {
-		case delivery := <-channel:
-			deliveryAck(delivery)
-			var resultMessage ResultMessage
-			if err := json.Unmarshal(delivery.Body, &resultMessage); err != nil {
-				return nil, err
-			}
-
-			if delivery.CorrelationId != taskID {
-				// use cache map to ensure there no resource leaked after long-time running.
-				// 'cause all task_result are broadcast to every client queue.
-				// So there will be lots of task_result which belongs to other client received.
-				// We must ensure that those task_result which our client wouldn't care can
-				// be purged after expiration time.
-				b.task2Reply.SetDefault(delivery.CorrelationId, &resultMessage)
-			} else {
-				return &resultMessage, nil
-			}
-		}
+	} else {
+		return nil, ResultNotAvailableYet
 	}
 }
 

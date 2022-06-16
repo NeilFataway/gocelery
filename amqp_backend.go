@@ -94,11 +94,16 @@ func (b *AMQPCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 
 	var resultMessage ResultMessage
 
-	delivery := <-channel
-	deliveryAck(delivery)
-	if err := json.Unmarshal(delivery.Body, &resultMessage); err != nil {
-		return nil, err
+	select {
+	case delivery := <-channel:
+		deliveryAck(delivery)
+		if err = json.Unmarshal(delivery.Body, &resultMessage); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, ResultNotAvailableYet
 	}
+
 	return &resultMessage, nil
 }
 

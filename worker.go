@@ -93,12 +93,19 @@ func (w *CeleryWorker) RunOnce() {
 		log.Printf("failed to run task message %s: %+v", taskMessage.ID, err)
 		return
 	}
-	defer releaseResultMessage(resultMsg)
+	if resultMsg != nil {
+		defer releaseResultMessage(resultMsg)
+	}
 
 	// push result to backend
 	if w.backend == nil {
 		// No result will be returned if no backend configured.
 		return
+	} else {
+		if resultMsg == nil {
+			log.Printf("no result returned while backend set.")
+			return
+		}
 	}
 
 	err = w.backend.SetResult(celeryMessage.Properties.CorrelationID,
@@ -198,15 +205,26 @@ func runTaskFunc(taskFunc *reflect.Value, message *TaskMessage) (*ResultMessage,
 	// construct arguments
 	in := make([]reflect.Value, messageNumArgs)
 	for i, arg := range message.Args {
-		origType := taskFunc.Type().In(i).Kind()
-		msgType := reflect.TypeOf(arg).Kind()
+		origType := taskFunc.Type().In(i)
+		msgType := reflect.TypeOf(arg)
+		if arg == nil {
+			in[i] = reflect.New(origType).Elem()
+			continue
+		}
+
 		// special case - convert float64 to int if applicable
 		// this is due to json limitation where all numbers are converted to float64
-		if origType == reflect.Int && msgType == reflect.Float64 {
+		if origType.Kind() == reflect.Int && msgType.Kind() == reflect.Float64 {
 			arg = int(arg.(float64))
 		}
-		if origType == reflect.Float32 && msgType == reflect.Float64 {
+		if origType.Kind() == reflect.Float32 && msgType.Kind() == reflect.Float64 {
 			arg = float32(arg.(float64))
+		}
+
+		// check the assignable
+		if !msgType.AssignableTo(origType) {
+			return nil, fmt.Errorf("argument index: %d of task: %s. Expected type of argument is %v, type %v instead",
+				i, message.ID, origType, msgType)
 		}
 
 		in[i] = reflect.ValueOf(arg)

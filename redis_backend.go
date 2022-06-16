@@ -50,7 +50,7 @@ func (cb *RedisCeleryBackend) GetResult(taskID string) (*ResultMessage, error) {
 		return nil, err
 	}
 	if val == nil {
-		return nil, fmt.Errorf("result not available")
+		return nil, ResultNotAvailableYet
 	}
 	var resultMessage ResultMessage
 	err = json.Unmarshal(val.([]byte), &resultMessage)
