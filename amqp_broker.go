@@ -27,8 +27,7 @@ type AMQPQueue struct {
 
 //AMQPCeleryBroker is RedisBroker for AMQP
 type AMQPCeleryBroker struct {
-	*amqp.Channel
-	Connection     *amqp.Connection
+	*AMQPSession
 	DirectExchange *AMQPExchange
 	RpcQueue       *AMQPQueue
 	DispatchQueue  *AMQPQueue
@@ -38,29 +37,20 @@ type AMQPCeleryBroker struct {
 }
 
 // NewAMQPConnection creates new AMQP channel
-func NewAMQPConnection(host string) (*amqp.Connection, *amqp.Channel) {
-	connection, err := amqp.Dial(host)
-	if err != nil {
-		panic(err)
-	}
-
-	channel, err := connection.Channel()
-	if err != nil {
-		panic(err)
-	}
-	return connection, channel
-}
 
 // NewAMQPCeleryBroker creates new AMQPCeleryBroker
 func NewAMQPCeleryBroker(host string) *AMQPCeleryBroker {
-	return NewAMQPCeleryBrokerByConnAndChannel(NewAMQPConnection(host))
+	session, err := NewAMQPSession(host)
+	if err != nil {
+		panic(err)
+	}
+	return NewAMQPCeleryBrokerByAMQPSession(session)
 }
 
 // NewAMQPCeleryBrokerByConnAndChannel creates new AMQPCeleryBroker using AMQP conn and channel
-func NewAMQPCeleryBrokerByConnAndChannel(conn *amqp.Connection, channel *amqp.Channel) *AMQPCeleryBroker {
+func NewAMQPCeleryBrokerByAMQPSession(session *AMQPSession) *AMQPCeleryBroker {
 	broker := &AMQPCeleryBroker{
-		Channel:    channel,
-		Connection: conn,
+		AMQPSession: session,
 		DirectExchange: &AMQPExchange{
 			Name:       "celery_rpc",
 			Type:       "direct",
@@ -84,89 +74,106 @@ func (b *AMQPCeleryBroker) StartConsumingChannel() error {
 		return fmt.Errorf("consumming on an unintialized broker is rejected")
 	}
 
-	if b.RpcQueue != nil {
-		// Broker is in RPC mod when RPCQueue is not nil
-		channel, err := b.Consume(b.RpcQueue.Name, "", false, false, false, false, nil)
-		if err != nil {
-			return err
+	reConsume := func() error {
+		if b.RpcQueue != nil {
+			// Broker is in RPC mod when RPCQueue is not nil
+			channel, err := b.Consume(b.RpcQueue.Name, "", false, false, false, false, nil)
+			if err != nil {
+				return err
+			}
+			b.channel = channel
+		} else {
+			// Broker is in Dispatch mod when RPCQueue is not nil
+			channel, err := b.Consume(b.DispatchQueue.Name, "", false, false, false, false, nil)
+			if err != nil {
+				return err
+			}
+			b.channel = channel
 		}
-		b.channel = channel
-	} else {
-		// Broker is in Dispatch mod when RPCQueue is not nil
-		channel, err := b.Consume(b.DispatchQueue.Name, "", false, false, false, false, nil)
-		if err != nil {
-			return err
-		}
-		b.channel = channel
+		return nil
 	}
 
-	return nil
+	// to setup reconnect hooks
+	b.SetupReconnectHooks(reConsume)
+
+	return reConsume()
 }
 
+// Init will declare all exchanges or queues we need.
 func (b *AMQPCeleryBroker) Init(oid string) error {
 	/* AMQP broker create two exchange, one with direct type, another with fanout type.
 	AMQP broker crate only one queue meanwhile. Both exchange should bind to the specied queue.
 	Direct type exchange should bind to the queue with routing key {oid}.
 	*/
-	if len(oid) > 0 {
-		// broker is in RPC mode when oid is not null
-		b.RpcQueue = &AMQPQueue{
-			Name:       fmt.Sprintf("%s_rpc_quue", oid),
-			Durable:    true,
-			AutoDelete: true,
+	init := func() error {
+		if len(oid) > 0 {
+			// broker is in RPC mode when oid is not null
+			b.RpcQueue = &AMQPQueue{
+				Name:       fmt.Sprintf("%s_rpc_quue", oid),
+				Durable:    true,
+				AutoDelete: true,
+			}
+
+			if err := b.ExchangeDeclare(
+				b.DirectExchange.Name,
+				b.DirectExchange.Type,
+				b.DirectExchange.Durable,
+				b.DirectExchange.AutoDelete,
+				false,
+				false,
+				nil,
+			); err != nil {
+				return err
+			}
+
+			if _, err := b.QueueDeclare(
+				b.RpcQueue.Name,
+				b.RpcQueue.Durable,
+				b.RpcQueue.AutoDelete,
+				false,
+				false,
+				amqp.Table{
+					"x-max-priority": 9,
+				},
+			); err != nil {
+				return err
+			}
+
+			if err := b.QueueBind(
+				b.RpcQueue.Name,
+				oid,
+				b.DirectExchange.Name,
+				false,
+				nil,
+			); err != nil {
+				return err
+			}
+		} else {
+			// broker is in dispatch mode when oid is null
+			if _, err := b.QueueDeclare(
+				b.DispatchQueue.Name,
+				b.DispatchQueue.Durable,
+				b.DispatchQueue.AutoDelete,
+				false,
+				false,
+				amqp.Table{
+					"x-max-priority": 9,
+				},
+			); err != nil {
+				return err
+			}
 		}
 
-		if err := b.ExchangeDeclare(
-			b.DirectExchange.Name,
-			b.DirectExchange.Type,
-			b.DirectExchange.Durable,
-			b.DirectExchange.AutoDelete,
-			false,
-			false,
-			nil,
-		); err != nil {
+		if err := b.Qos(b.Rate, 0, false); err != nil {
 			return err
 		}
 
-		if _, err := b.QueueDeclare(
-			b.RpcQueue.Name,
-			b.RpcQueue.Durable,
-			b.RpcQueue.AutoDelete,
-			false,
-			false,
-			amqp.Table{
-				"x-max-priority": 9,
-			},
-		); err != nil {
-			return err
-		}
-
-		if err := b.QueueBind(
-			b.RpcQueue.Name,
-			oid,
-			b.DirectExchange.Name,
-			false,
-			nil,
-		); err != nil {
-			return err
-		}
-	} else {
-		// broker is in dispatch mode when oid is null
-		if _, err := b.QueueDeclare(
-			b.DispatchQueue.Name,
-			b.DispatchQueue.Durable,
-			b.DispatchQueue.AutoDelete,
-			false,
-			false,
-			amqp.Table{
-				"x-max-priority": 9,
-			},
-		); err != nil {
-			return err
-		}
+		return nil
 	}
 
-	if err := b.Qos(b.Rate, 0, false); err != nil {
+	b.SetupReconnectHooks(init)
+
+	if err := init(); err != nil {
 		return err
 	}
 
@@ -214,7 +221,7 @@ func (b *AMQPCeleryBroker) SendCeleryMessage(message *CeleryMessage) error {
 
 func (b *AMQPCeleryBroker) GetCeleryMessage() (*CeleryMessage, error) {
 	select {
-	case delivery := <-b.channel:
+	case delivery := <-b.GetConsumerChannel():
 		deliveryAck(delivery)
 		message := &CeleryMessage{
 			Body:            string(delivery.Body),
@@ -238,4 +245,10 @@ func (b *AMQPCeleryBroker) GetCeleryMessage() (*CeleryMessage, error) {
 	default:
 		return nil, fmt.Errorf("consuming broker channel is empty")
 	}
+}
+
+func (b *AMQPCeleryBroker) GetConsumerChannel() <-chan amqp.Delivery {
+	b.RWLocker.RLock()
+	defer b.RWLocker.RUnlock()
+	return b.channel
 }

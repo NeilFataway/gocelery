@@ -5,10 +5,16 @@
 package gocelery
 
 import (
-	"log"
+	"fmt"
+	log "github.com/sirupsen/logrus"
+	"sync"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
 )
+
+const DefaultRetryDelay = 5
 
 // deliveryAck acknowledges delivery message with retries on error
 func deliveryAck(delivery amqp.Delivery) {
@@ -19,6 +25,152 @@ func deliveryAck(delivery amqp.Delivery) {
 		}
 	}
 	if err != nil {
-		log.Printf("amqp_backend: failed to acknowledge result message %+v: %+v", delivery.MessageId, err)
+		log.Warnf("amqp_backend: failed to acknowledge result message %+v: %+v", delivery.MessageId, err)
 	}
+}
+
+type ReconnectFunc func() error
+
+type AMQPSession struct {
+	url                     string
+	ConsumerDeliveryChannel <-chan amqp.Delivery
+	conn                    *amqp.Connection
+	RWLocker                sync.RWMutex
+	NotifyCloseChan         chan *amqp.Error
+	*amqp.Channel
+
+	hooks []ReconnectFunc
+}
+
+func NewAMQPSession(url string) (*AMQPSession, error) {
+	ac, err := amqp.Dial(url)
+	if err != nil {
+		return nil, errors.Wrap(err, "connect to amqp server failed.")
+	}
+
+	channel, err := ac.Channel()
+	if err != nil {
+		return nil, errors.Wrap(err, "get amqp channel failed.")
+	}
+
+	session := &AMQPSession{
+		url:             url,
+		conn:            ac,
+		NotifyCloseChan: make(chan *amqp.Error),
+		Channel:         channel,
+	}
+
+	ac.NotifyClose(session.NotifyCloseChan)
+
+	// Launch connection watcher/reconnect
+	go session.watchNotifyClose()
+
+	return session, nil
+}
+
+func (p *AMQPSession) SetupReconnectHooks(hook ReconnectFunc) {
+	p.RWLocker.Lock()
+	defer p.RWLocker.Unlock()
+
+	p.hooks = append(p.hooks, hook)
+}
+
+func (p *AMQPSession) reConnect() error {
+	var ac *amqp.Connection
+	var err error
+
+	ac, err = amqp.Dial(p.url)
+	if err != nil {
+		return errors.Wrap(err, "failed on reconnect to AMQP server")
+	}
+
+	p.conn = ac
+	return nil
+}
+
+func (p *AMQPSession) newServerChannel() (*amqp.Channel, error) {
+	if p.conn == nil {
+		return nil, errors.New("r.Conn is nil - did this get instantiated correctly? bug?")
+	}
+
+	ch, err := p.conn.Channel()
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to instantiate channel")
+	}
+	return ch, err
+}
+
+func (p *AMQPSession) watchNotifyClose() {
+	for {
+		func() {
+			closeErr := <-p.NotifyCloseChan
+
+			log.Warnf("received message on notify close channel: '%+v' (reconnecting)", closeErr)
+
+			// Acquire mutex to pause all consumers/producers while we reconnect AND prevent
+			// access to the channel map
+			p.RWLocker.Lock()
+			defer p.RWLocker.Unlock()
+
+			var attempts int
+
+			for {
+				attempts++
+				if err := p.reConnect(); err != nil {
+					log.Warn("unable to complete reconnect: %s; retrying in %d", err, DefaultRetryDelay)
+					time.Sleep(time.Duration(DefaultRetryDelay) * time.Second)
+					continue
+				}
+				log.Info("successfully reconnected after %d attempts", attempts)
+				break
+			}
+
+			// Create and set a new notify close channel (since old one gets shutdown)
+			p.NotifyCloseChan = make(chan *amqp.Error, 0)
+			p.conn.NotifyClose(p.NotifyCloseChan)
+
+			// Update channel
+			serverChannel, err := p.newServerChannel()
+			if err != nil {
+				log.Error("unable to set new channel: %s", err)
+				panic(fmt.Sprintf("unable to set new channel: %s", err))
+			}
+
+			p.Channel = serverChannel
+
+			// run reconnect hooks
+			for _, hook := range p.hooks {
+				if err = hook(); err != nil {
+					log.WithError(err).Error("reconnect hook execute failed.")
+				}
+			}
+
+			log.Info("watchNotifyClose has completed successfully")
+		}()
+	}
+}
+
+func (p *AMQPSession) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
+	if p.Channel == nil {
+		ch, err := p.newServerChannel()
+		if err != nil {
+			return errors.Wrap(err, "unable to create server channel")
+		}
+
+		p.RWLocker.Lock()
+		p.Channel = ch
+		p.RWLocker.Unlock()
+	}
+
+	p.RWLocker.RLock()
+	defer p.RWLocker.RUnlock()
+	return p.Channel.Publish(exchange, key, mandatory, immediate, msg)
+}
+
+func (p *AMQPSession) delivery() <-chan amqp.Delivery {
+	// Acquire lock (in case we are reconnecting and channels are being swapped)
+	p.RWLocker.RLock()
+	defer p.RWLocker.RUnlock()
+
+	return p.ConsumerDeliveryChannel
 }

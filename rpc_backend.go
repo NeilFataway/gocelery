@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/patrickmn/go-cache"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"time"
 
 	"github.com/streadway/amqp"
@@ -22,10 +22,10 @@ side who have waiting for it through the {oid}_result queue which is binding to
 celery_backend exchange.
 */
 type RpcCeleryBackend struct {
-	*amqp.Channel
-	Connection *amqp.Connection
-	Queue      *AMQPQueue
-	Exchange   *AMQPExchange
+	*AMQPSession
+	Queue    *AMQPQueue
+	Exchange *AMQPExchange
+	channel  <-chan amqp.Delivery
 
 	oid            string
 	task2Reply     *cache.Cache
@@ -35,14 +35,17 @@ type RpcCeleryBackend struct {
 
 // NewRpcCeleryBackend creates new RpcCeleryBackend
 func NewRpcCeleryBackend(host string) *RpcCeleryBackend {
-	return NewRpcCeleryBackendByConnAndChannel(NewAMQPConnection(host))
+	session, err := NewAMQPSession(host)
+	if err != nil {
+		panic(err)
+	}
+	return NewRpcCeleryBackendByAMQPSession(session)
 }
 
 // NewRpcCeleryBackendByConnAndChannel creates new RpcCeleryBackend by AMQP connection and channel
-func NewRpcCeleryBackendByConnAndChannel(conn *amqp.Connection, channel *amqp.Channel) *RpcCeleryBackend {
+func NewRpcCeleryBackendByAMQPSession(session *AMQPSession) *RpcCeleryBackend {
 	backend := &RpcCeleryBackend{
-		Channel:    channel,
-		Connection: conn,
+		AMQPSession: session,
 		Queue: &AMQPQueue{
 			Durable:    true,
 			AutoDelete: true,
@@ -63,62 +66,81 @@ func (b *RpcCeleryBackend) Init(oid string) error {
 	// autodelete is automatically set to true by python
 	// (406) PRECONDITION_FAILED - inequivalent arg 'durable' for queue 'bc58c0d895c7421eb7cb2b9bbbd8b36f' in vhost '/': received 'true' but current is 'false'
 
-	args := amqp.Table{"x-expires": int32(b.ExpireDuration.Microseconds())}
-	b.Queue.Name = fmt.Sprintf("%s_%s", oid, "result")
-	_, err := b.QueueDeclare(
-		b.Queue.Name,       // name
-		b.Queue.Durable,    // durable
-		b.Queue.AutoDelete, // autoDelete
-		false,              // exclusive
-		false,              // noWait
-		args,               // args
-	)
-	if err != nil {
-		return err
+	init := func() error {
+		args := amqp.Table{"x-expires": int32(b.ExpireDuration.Microseconds())}
+		b.Queue.Name = fmt.Sprintf("%s_%s", oid, "result")
+		_, err := b.QueueDeclare(
+			b.Queue.Name,       // name
+			b.Queue.Durable,    // durable
+			b.Queue.AutoDelete, // autoDelete
+			false,              // exclusive
+			false,              // noWait
+			args,               // args
+		)
+
+		if err != nil {
+			return err
+		}
+
+		err = b.ExchangeDeclare(
+			b.Exchange.Name,
+			b.Exchange.Type,
+			b.Exchange.Durable,
+			b.Exchange.AutoDelete,
+			false,
+			false,
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+
+		err = b.QueueBind(b.Queue.Name,
+			"",
+			b.Exchange.Name,
+			false,
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
-	err = b.ExchangeDeclare(
-		b.Exchange.Name,
-		b.Exchange.Type,
-		b.Exchange.Durable,
-		b.Exchange.AutoDelete,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
+	b.SetupReconnectHooks(init)
+
+	if err := init(); err != nil {
 		return err
 	}
-
-	err = b.QueueBind(b.Queue.Name,
-		"",
-		b.Exchange.Name,
-		false,
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-
 	b.Initialized = true
 	return b.startConsume()
 }
 
 func (b *RpcCeleryBackend) startConsume() error {
 	// open channel temporarily
-	channel, err := b.Consume(b.Queue.Name, "", false, false, false, false, nil)
-	if err != nil {
+	reConsume := func() error {
+		channel, err := b.Consume(b.Queue.Name, "", false, false, false, false, nil)
+		if err != nil {
+			return err
+		}
+		b.channel = channel
+		return nil
+	}
+
+	if err := reConsume(); err != nil {
 		return err
 	}
+
+	b.SetupReconnectHooks(reConsume)
 
 	go func() {
 		for {
 			select {
-			case delivery := <-channel:
+			case delivery := <-b.GetConsumerChannel():
 				deliveryAck(delivery)
 				var resultMessage ResultMessage
-				if err = json.Unmarshal(delivery.Body, &resultMessage); err != nil {
-					log.Print("Error: unserialize result failed.")
+				if err := json.Unmarshal(delivery.Body, &resultMessage); err != nil {
+					log.Warn("Error: unserialize result failed.")
 					continue
 				}
 				// use cache map to ensure there no resource leaked after long-time running.
@@ -172,4 +194,10 @@ func (b *RpcCeleryBackend) SetResult(taskID string, result *ResultMessage) error
 		false,
 		message,
 	)
+}
+
+func (b *RpcCeleryBackend) GetConsumerChannel() <-chan amqp.Delivery {
+	b.RWLocker.RLock()
+	defer b.RWLocker.RUnlock()
+	return b.channel
 }

@@ -7,7 +7,7 @@ package gocelery
 import (
 	"context"
 	"fmt"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"reflect"
 	"sync"
 	"time"
@@ -90,7 +90,7 @@ func (w *CeleryWorker) RunOnce() {
 	// run task
 	resultMsg, err := w.RunTask(taskMessage)
 	if err != nil {
-		log.Printf("failed to run task message %s: %+v", taskMessage.ID, err)
+		log.Errorf("failed to run task message %s: %+v", taskMessage.ID, err)
 		return
 	}
 	if resultMsg != nil {
@@ -103,7 +103,7 @@ func (w *CeleryWorker) RunOnce() {
 		return
 	} else {
 		if resultMsg == nil {
-			log.Printf("no result returned while backend set.")
+			log.Warn("no result returned while backend set.")
 			return
 		}
 	}
@@ -111,7 +111,7 @@ func (w *CeleryWorker) RunOnce() {
 	err = w.backend.SetResult(celeryMessage.Properties.CorrelationID,
 		resultMsg)
 	if err != nil {
-		log.Printf("failed to push result: %+v", err)
+		log.Errorf("failed to push result: %+v", err)
 		return
 	}
 }

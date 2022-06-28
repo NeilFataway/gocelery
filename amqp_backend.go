@@ -20,38 +20,27 @@ side who have waiting for it through the {oid}_result queue which is binding to
 celery_backend exchange.
 */
 type AMQPCeleryBackend struct {
-	*amqp.Channel
-	Connection     *amqp.Connection
-	Host           string
+	*AMQPSession
 	ExpireDuration time.Duration
 }
 
 // NewAMQPCeleryBackend creates new AMQPCeleryBackend
 func NewAMQPCeleryBackend(host string) *AMQPCeleryBackend {
-	backend := NewAMQPCeleryBackendByConnAndChannel(NewAMQPConnection(host))
-	backend.Host = host
+	session, err := NewAMQPSession(host)
+	if err != nil {
+		panic(err)
+	}
+	backend := NewAMQPCeleryBackendByAMQPSession(session)
 	return backend
 }
 
 // NewAMQPCeleryBackendByConnAndChannel creates new AMQPCeleryBackend by AMQP connection and channel
-func NewAMQPCeleryBackendByConnAndChannel(conn *amqp.Connection, channel *amqp.Channel) *AMQPCeleryBackend {
+func NewAMQPCeleryBackendByAMQPSession(session *AMQPSession) *AMQPCeleryBackend {
 	backend := &AMQPCeleryBackend{
-		Channel:        channel,
-		Connection:     conn,
+		AMQPSession:    session,
 		ExpireDuration: 24 * time.Hour,
 	}
 	return backend
-}
-
-// Reconnect reconnects to AMQP server
-func (b *AMQPCeleryBackend) Reconnect() {
-	go func() {
-		_ = b.Connection.Close()
-	}()
-
-	conn, channel := NewAMQPConnection(b.Host)
-	b.Channel = channel
-	b.Connection = conn
 }
 
 // GetResult retrieves result from AMQP queue
