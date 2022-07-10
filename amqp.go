@@ -117,11 +117,11 @@ func (p *AMQPSession) watchNotifyClose() {
 			for {
 				attempts++
 				if err := p.reConnect(); err != nil {
-					log.Warn("unable to complete reconnect: %s; retrying in %d", err, DefaultRetryDelay)
+					log.Warnf("unable to complete reconnect: %s; retrying in %d", err, DefaultRetryDelay)
 					time.Sleep(time.Duration(DefaultRetryDelay) * time.Second)
 					continue
 				}
-				log.Info("successfully reconnected after %d attempts", attempts)
+				log.Infof("successfully reconnected after %d attempts", attempts)
 				break
 			}
 
@@ -132,7 +132,7 @@ func (p *AMQPSession) watchNotifyClose() {
 			// Update channel
 			serverChannel, err := p.newServerChannel()
 			if err != nil {
-				log.Error("unable to set new channel: %s", err)
+				log.Errorf("unable to set new channel: %s", err)
 				panic(fmt.Sprintf("unable to set new channel: %s", err))
 			}
 

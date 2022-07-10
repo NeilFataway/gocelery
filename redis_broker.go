@@ -7,7 +7,7 @@ package gocelery
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -55,7 +55,7 @@ func (cb *RedisCeleryBroker) Init(oid string) error {
 		for {
 			messageJSON, err := conn.Do("BRPOP", queueList...)
 			if err != nil {
-				log.Printf("[redis_broker] failed to receive message: %v", err)
+				log.Errorf("[redis_broker] failed to receive message: %v", err)
 				continue
 			} else {
 				cb.messageChannel <- messageJSON
