@@ -32,11 +32,12 @@ func deliveryAck(delivery amqp.Delivery) {
 type ReconnectFunc func() error
 
 type AMQPSession struct {
-	url                     string
-	ConsumerDeliveryChannel <-chan amqp.Delivery
-	conn                    *amqp.Connection
-	RWLocker                sync.RWMutex
-	NotifyCloseChan         chan *amqp.Error
+	url                       string
+	ConsumerDeliveryChannel   <-chan amqp.Delivery
+	conn                      *amqp.Connection
+	RWLocker                  sync.RWMutex
+	ConnectionCloseNotifyChan chan *amqp.Error
+	ChannelCloseNotifyChan    chan *amqp.Error
 	*amqp.Channel
 
 	hooks []ReconnectFunc
@@ -54,13 +55,15 @@ func NewAMQPSession(url string) (*AMQPSession, error) {
 	}
 
 	session := &AMQPSession{
-		url:             url,
-		conn:            ac,
-		NotifyCloseChan: make(chan *amqp.Error),
-		Channel:         channel,
+		url:                       url,
+		conn:                      ac,
+		ConnectionCloseNotifyChan: make(chan *amqp.Error),
+		ChannelCloseNotifyChan:    make(chan *amqp.Error),
+		Channel:                   channel,
 	}
 
-	ac.NotifyClose(session.NotifyCloseChan)
+	ac.NotifyClose(session.ConnectionCloseNotifyChan)
+	channel.NotifyClose(session.ChannelCloseNotifyChan)
 
 	// Launch connection watcher/reconnect
 	go session.watchNotifyClose()
@@ -102,51 +105,88 @@ func (p *AMQPSession) newServerChannel() (*amqp.Channel, error) {
 
 func (p *AMQPSession) watchNotifyClose() {
 	for {
-		func() {
-			closeErr := <-p.NotifyCloseChan
+		select {
+		case closeErr := <-p.ConnectionCloseNotifyChan:
+			func() {
+				log.Warnf("received message on notify close connection: '%+v' (reconnecting)", closeErr)
 
-			log.Warnf("received message on notify close channel: '%+v' (reconnecting)", closeErr)
+				// Acquire mutex to pause all consumers/producers while we reconnect AND prevent
+				// access to the channel map
+				p.RWLocker.Lock()
+				defer p.RWLocker.Unlock()
 
-			// Acquire mutex to pause all consumers/producers while we reconnect AND prevent
-			// access to the channel map
-			p.RWLocker.Lock()
-			defer p.RWLocker.Unlock()
+				var attempts int
 
-			var attempts int
-
-			for {
-				attempts++
-				if err := p.reConnect(); err != nil {
-					log.Warnf("unable to complete reconnect: %s; retrying in %d", err, DefaultRetryDelay)
-					time.Sleep(time.Duration(DefaultRetryDelay) * time.Second)
-					continue
+				for {
+					attempts++
+					if err := p.reConnect(); err != nil {
+						log.Warnf("unable to complete reconnect: %s; retrying in %d", err, DefaultRetryDelay)
+						time.Sleep(time.Duration(DefaultRetryDelay) * time.Second)
+						continue
+					}
+					log.Infof("successfully reconnected after %d attempts", attempts)
+					break
 				}
-				log.Infof("successfully reconnected after %d attempts", attempts)
-				break
-			}
 
-			// Create and set a new notify close channel (since old one gets shutdown)
-			p.NotifyCloseChan = make(chan *amqp.Error, 0)
-			p.conn.NotifyClose(p.NotifyCloseChan)
+				// Create and set a new notify close channel (since old one gets shutdown)
+				p.ConnectionCloseNotifyChan = make(chan *amqp.Error, 0)
+				p.conn.NotifyClose(p.ConnectionCloseNotifyChan)
 
-			// Update channel
-			serverChannel, err := p.newServerChannel()
-			if err != nil {
-				log.Errorf("unable to set new channel: %s", err)
-				panic(fmt.Sprintf("unable to set new channel: %s", err))
-			}
-
-			p.Channel = serverChannel
-
-			// run reconnect hooks
-			for _, hook := range p.hooks {
-				if err = hook(); err != nil {
-					log.WithError(err).Error("reconnect hook execute failed.")
+				// Update channel
+				serverChannel, err := p.newServerChannel()
+				if err != nil {
+					log.Errorf("unable to set new channel: %s", err)
+					panic(fmt.Sprintf("unable to set new channel: %s", err))
 				}
-			}
 
-			log.Info("watchNotifyClose has completed successfully")
-		}()
+				p.Channel = serverChannel
+				p.ChannelCloseNotifyChan = make(chan *amqp.Error, 0)
+				p.Channel.NotifyClose(p.ChannelCloseNotifyChan)
+
+				// run reconnect hooks
+				for _, hook := range p.hooks {
+					if err = hook(); err != nil {
+						log.WithError(err).Error("reconnect hook execute failed.")
+					}
+				}
+
+				log.Info("watchNotifyClose has completed successfully")
+			}()
+		case closeErr := <-p.ChannelCloseNotifyChan:
+			func() {
+				if p.conn.IsClosed() {
+					log.Info("Connection is closing. ignore channel close notify.")
+					return
+				}
+				log.Warnf("received message on notify close channel: '%+v' (reconnecting)", closeErr)
+
+				// Acquire mutex to pause all consumers/producers while we reconnect AND prevent
+				// access to the channel map
+				p.RWLocker.Lock()
+				defer p.RWLocker.Unlock()
+
+				// Update channel
+				serverChannel, err := p.newServerChannel()
+				if err != nil {
+					log.Errorf("unable to set new channel: %s", err)
+					panic(fmt.Sprintf("unable to set new channel: %s", err))
+				}
+
+				p.Channel = serverChannel
+				p.ChannelCloseNotifyChan = make(chan *amqp.Error, 0)
+				p.Channel.NotifyClose(p.ChannelCloseNotifyChan)
+
+				// run reconnect hooks
+				for _, hook := range p.hooks {
+					if err = hook(); err != nil {
+						log.WithError(err).Error("reconnect hook execute failed.")
+					}
+				}
+
+				log.Info("watchNotifyClose has completed successfully")
+			}()
+		}
+
 	}
 }
 
