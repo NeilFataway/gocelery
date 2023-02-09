@@ -115,6 +115,8 @@ func (p *AMQPSession) watchNotifyClose() {
 				p.RWLocker.Lock()
 				defer p.RWLocker.Unlock()
 
+			hookRetry:
+
 				var attempts int
 
 				for {
@@ -128,27 +130,34 @@ func (p *AMQPSession) watchNotifyClose() {
 					break
 				}
 
-				// Create and set a new notify close channel (since old one gets shutdown)
-				p.ConnectionCloseNotifyChan = make(chan *amqp.Error, 0)
-				p.conn.NotifyClose(p.ConnectionCloseNotifyChan)
-
 				// Update channel
 				serverChannel, err := p.newServerChannel()
 				if err != nil {
 					log.Errorf("unable to set new channel: %s", err)
 					panic(fmt.Sprintf("unable to set new channel: %s", err))
 				}
-
 				p.Channel = serverChannel
-				p.ChannelCloseNotifyChan = make(chan *amqp.Error, 0)
-				p.Channel.NotifyClose(p.ChannelCloseNotifyChan)
 
 				// run reconnect hooks
 				for _, hook := range p.hooks {
 					if err = hook(); err != nil {
 						log.WithError(err).Error("reconnect hook execute failed.")
+						if p.conn.IsClosed() {
+							log.Info("connection shutdown already, let's reconnect and run hooks again.")
+							goto hookRetry
+						} else {
+							log.WithError(err).Error("unrecoverable error: reconnection hook failed, panic now")
+							panic(err)
+						}
 					}
 				}
+
+				// register close notify handler after all hooks completely run.
+				// Create and set a new notify close channel (since old one gets shutdown)
+				p.ConnectionCloseNotifyChan = make(chan *amqp.Error, 0)
+				p.conn.NotifyClose(p.ConnectionCloseNotifyChan)
+				p.ChannelCloseNotifyChan = make(chan *amqp.Error, 0)
+				p.Channel.NotifyClose(p.ChannelCloseNotifyChan)
 
 				log.Info("watchNotifyClose has completed successfully")
 			}()
@@ -165,6 +174,7 @@ func (p *AMQPSession) watchNotifyClose() {
 				p.RWLocker.Lock()
 				defer p.RWLocker.Unlock()
 
+			hookRetry:
 				// Update channel
 				serverChannel, err := p.newServerChannel()
 				if err != nil {
@@ -173,15 +183,24 @@ func (p *AMQPSession) watchNotifyClose() {
 				}
 
 				p.Channel = serverChannel
-				p.ChannelCloseNotifyChan = make(chan *amqp.Error, 0)
-				p.Channel.NotifyClose(p.ChannelCloseNotifyChan)
 
 				// run reconnect hooks
 				for _, hook := range p.hooks {
 					if err = hook(); err != nil {
 						log.WithError(err).Error("reconnect hook execute failed.")
+						if p.conn.IsClosed() {
+							log.Info("connection shutdown already, let's reconnect and run hooks again.")
+							goto hookRetry
+						} else {
+							log.WithError(err).Error("unrecoverable error: reconnection hook failed, panic now")
+							panic(err)
+						}
 					}
 				}
+
+				// register close notify handler after all hooks completely run.
+				p.ChannelCloseNotifyChan = make(chan *amqp.Error, 0)
+				p.Channel.NotifyClose(p.ChannelCloseNotifyChan)
 
 				log.Info("watchNotifyClose has completed successfully")
 			}()
