@@ -109,6 +109,8 @@ func (p *AMQPSession) watchNotifyClose() {
 		case closeErr := <-p.ConnectionCloseNotifyChan:
 			func() {
 				log.Warnf("received message on notify close connection: '%+v' (reconnecting)", closeErr)
+				// Connection shutdown will cause channel close notify triggered. this step is used to avoid channel shutdown goroutine blocked.
+				<-p.ChannelCloseNotifyChan
 
 				// Acquire mutex to pause all consumers/producers while we reconnect AND prevent
 				// access to the channel map
