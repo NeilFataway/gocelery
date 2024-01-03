@@ -25,7 +25,7 @@ type AMQPQueue struct {
 	AutoDelete bool
 }
 
-//AMQPCeleryBroker is RedisBroker for AMQP
+// AMQPCeleryBroker is RedisBroker for AMQP
 type AMQPCeleryBroker struct {
 	*AMQPSession
 	DirectExchange *AMQPExchange
@@ -223,24 +223,20 @@ func (b *AMQPCeleryBroker) GetCeleryMessage() (*CeleryMessage, error) {
 	select {
 	case delivery := <-b.GetConsumerChannel():
 		deliveryAck(delivery)
-		message := &CeleryMessage{
-			Body:            string(delivery.Body),
-			Headers:         delivery.Headers,
-			ContentType:     delivery.ContentType,
-			ContentEncoding: delivery.ContentEncoding,
-			Properties: CeleryProperties{
-				BodyEncoding:  "base64",
-				CorrelationID: delivery.CorrelationId,
-				ReplyTo:       delivery.ReplyTo,
-				DeliveryInfo: &CeleryDeliveryInfo{
-					Priority:   delivery.Priority,
-					Exchange:   delivery.Exchange,
-					RoutingKey: delivery.RoutingKey,
-				},
-				DeliveryMode: delivery.DeliveryMode,
-				DeliveryTag:  fmt.Sprintf("%d%", delivery.DeliveryTag),
-			},
+		message := celeryMessagePool.Get().(*CeleryMessage)
+		message.Body = string(delivery.Body)
+		message.Headers = delivery.Headers
+		message.ContentType = delivery.ContentType
+		message.ContentEncoding = delivery.ContentEncoding
+		message.Properties.CorrelationID = delivery.CorrelationId
+		message.Properties.ReplyTo = delivery.ReplyTo
+		message.Properties.DeliveryInfo = &CeleryDeliveryInfo{
+			Priority:   delivery.Priority,
+			Exchange:   delivery.Exchange,
+			RoutingKey: delivery.RoutingKey,
 		}
+		message.Properties.DeliveryMode = delivery.DeliveryMode
+		message.Properties.DeliveryTag = fmt.Sprintf("%d", delivery.DeliveryTag)
 		return message, nil
 	default:
 		return nil, fmt.Errorf("consuming broker channel is empty")

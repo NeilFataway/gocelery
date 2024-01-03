@@ -27,10 +27,15 @@ type CeleryMessage struct {
 func (cm *CeleryMessage) reset() {
 	cm.Headers = nil
 	cm.Body = ""
+	cm.Headers = make(map[string]interface{})
+	cm.ContentType = "application/json"
+	cm.ContentEncoding = "utf-8"
 	cm.Properties.CorrelationID = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.ReplyTo = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.DeliveryTag = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.DeliveryInfo = &defaultCeleryDeliveryInfo
+	cm.Properties.BodyEncoding = "base64"
+	cm.Properties.DeliveryMode = 2
 }
 
 func (cm *CeleryMessage) setDeliveryInfo(info *CeleryDeliveryInfo) {
@@ -41,7 +46,7 @@ var celeryMessagePool = sync.Pool{
 	New: func() interface{} {
 		return &CeleryMessage{
 			Body:        "",
-			Headers:     map[string]interface{}{},
+			Headers:     make(map[string]interface{}),
 			ContentType: "application/json",
 			Properties: CeleryProperties{
 				BodyEncoding:  "base64",
