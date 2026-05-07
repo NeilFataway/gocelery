@@ -33,7 +33,11 @@ func (cm *CeleryMessage) reset() {
 	cm.Properties.CorrelationID = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.ReplyTo = uuid.Must(uuid.NewV4()).String()
 	cm.Properties.DeliveryTag = uuid.Must(uuid.NewV4()).String()
-	cm.Properties.DeliveryInfo = &defaultCeleryDeliveryInfo
+	cm.Properties.DeliveryInfo = &CeleryDeliveryInfo{
+		Priority:   0,
+		RoutingKey: "",
+		Exchange:   "",
+	}
 	cm.Properties.BodyEncoding = "base64"
 	cm.Properties.DeliveryMode = 2
 }
@@ -52,7 +56,11 @@ var celeryMessagePool = sync.Pool{
 				BodyEncoding:  "base64",
 				CorrelationID: uuid.Must(uuid.NewV4()).String(),
 				ReplyTo:       uuid.Must(uuid.NewV4()).String(),
-				DeliveryInfo:  &defaultCeleryDeliveryInfo,
+				DeliveryInfo:  &CeleryDeliveryInfo{
+					Priority:   0,
+					RoutingKey: "",
+					Exchange:   "",
+				},
 				DeliveryMode:  2,
 				DeliveryTag:   uuid.Must(uuid.NewV4()).String(),
 			},
@@ -89,12 +97,6 @@ type CeleryDeliveryInfo struct {
 	Priority   uint8  `json:"priority"`
 	RoutingKey string `json:"routing_key"`
 	Exchange   string `json:"exchange"`
-}
-
-var defaultCeleryDeliveryInfo = CeleryDeliveryInfo{
-	Priority:   0,
-	RoutingKey: "",
-	Exchange:   "",
 }
 
 // GetTaskMessage retrieve and decode task messages from broker

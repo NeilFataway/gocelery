@@ -56,7 +56,7 @@ func NewRpcCeleryBackendByAMQPSession(session *AMQPSession) *RpcCeleryBackend {
 			Durable:    true,
 			AutoDelete: true,
 		},
-		ExpireDuration: 24 * time.Hour,
+		ExpireDuration: 2 * time.Hour,
 		task2Reply:     cache.New(24*time.Hour, 5*time.Minute),
 	}
 	return backend
@@ -67,7 +67,7 @@ func (b *RpcCeleryBackend) Init(oid string) error {
 	// (406) PRECONDITION_FAILED - inequivalent arg 'durable' for queue 'bc58c0d895c7421eb7cb2b9bbbd8b36f' in vhost '/': received 'true' but current is 'false'
 
 	init := func() error {
-		args := amqp.Table{"x-expires": int32(b.ExpireDuration.Microseconds())}
+		args := amqp.Table{"x-expires": int32(b.ExpireDuration.Milliseconds())}
 		b.Queue.Name = fmt.Sprintf("%s_%s", oid, "result")
 		_, err := b.QueueDeclare(
 			b.Queue.Name,       // name
