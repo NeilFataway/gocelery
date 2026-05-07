@@ -95,7 +95,11 @@ func (p *AMQPSession) newServerChannel() (*amqp.Channel, error) {
 	if p.conn == nil {
 		return nil, errors.New("r.Conn is nil - did this get instantiated correctly? bug?")
 	}
-
+	time.Sleep(1 * time.Second)
+	if p.conn.IsClosed() {
+		log.Error("connection is closed")
+		return nil, errors.New("r.Conn is closed.")
+	}
 	ch, err := p.conn.Channel()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to instantiate channel")
